@@ -1,0 +1,32 @@
+{
+  "experiment_name": "baseline_wine",
+  "n_draws_used": 2000,
+  "thin": 100,
+  "n_members": 10,
+  "val_metrics": {
+    "accuracy": 0.8215384615384616,
+    "precision": 0.5967741935483871,
+    "recall": 0.2890625,
+    "f1": 0.3894736842105263,
+    "roc_auc": 0.8091924090038314,
+    "log_loss": 0.3913573342341992,
+    "ece": 0.021229159436205357
+  },
+  "test_metrics": {
+    "accuracy": 0.8215384615384616,
+    "precision": 0.6116504854368932,
+    "recall": 0.24705882352941178,
+    "f1": 0.35195530726256985,
+    "roc_auc": 0.8157763392438315,
+    "log_loss": 0.3888109753367885,
+    "ece": 0.029295002849024063
+  },
+  "bayes_config": {
+    "draws": 1000,
+    "tune": 1000,
+    "chains": 2,
+    "target_accept": 0.9,
+    "thin": 100,
+    "max_members": 10
+  }
+}

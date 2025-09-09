@@ -1,0 +1,38 @@
+dataset:
+  name: wine_quality   # options: wine_quality, csv
+  target: ""          # used only for csv
+  csv_path: ""        # used only for csv
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  scale_numeric: true
+  quality_threshold: 7
+  wine_variant: both   # one of: red, white, both
+
+training:
+  n_jobs: -1
+  cv_seed: 42
+
+models:
+  logistic_regression:
+    enabled: true
+    C: 1.0
+    penalty: "l2"
+    class_weight: null        # or "balanced"
+    max_iter: 200
+
+  mlp:
+    enabled: true
+    hidden_layer_sizes: [100, 50]
+    activation: "relu"
+    solver: "adam"
+    alpha: 0.0001
+    learning_rate: "adaptive"
+    max_iter: 200
+
+output:
+  results_dir: "results"
+  save_predictions: true
+  save_metrics_csv: true
+  save_plots: true
+  experiment_name: "baseline_wine"

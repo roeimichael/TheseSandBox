@@ -1,0 +1,9 @@
+numpy
+pandas
+scikit-learn
+joblib
+pyyaml
+matplotlib
+catboost
+pymc
+arviz

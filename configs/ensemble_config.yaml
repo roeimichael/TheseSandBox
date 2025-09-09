@@ -1,0 +1,25 @@
+dataset:
+  name: wine_quality
+  target: ""
+  csv_path: ""
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  scale_numeric: true
+  quality_threshold: 7
+  wine_variant: both
+
+bayes:
+  bayes_logreg:
+    draws: 1000
+    tune: 1000
+    chains: 2
+    target_accept: 0.9
+    thin: 100
+    max_members: 10
+
+output:
+  results_dir: "results"
+  experiment_name: "baseline_wine"
+  save_ensemble_metrics_csv: true
+  save_member_metrics_csv: true
