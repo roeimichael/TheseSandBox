@@ -7,3 +7,5 @@ matplotlib
 catboost
 pymc
 arviz
+torch
+pyro-ppl

@@ -1,0 +1,85 @@
+# Preset experiment configurations for ensemble member selection strategies.
+# Copy a block into your active ensemble_config.yaml or pass a config override loader if supported.
+
+# 1) Balanced per-chain selection (aims for diversity across chains)
+per_chain_diverse:
+  bayes:
+    bayes_logreg:
+      draws: 1500          # more draws to give each chain room
+      tune: 1000
+      chains: 4            # more chains to explore more regions
+      target_accept: 0.9
+      thin: 100
+      max_members: 10
+      candidate_pool_size: 120
+      sample_strategy: per_chain
+      per_chain_candidates: 30  # ~30 per chain → 120 total
+      random_seed: 123
+  output:
+    experiment_name: "per_chain_diverse"
+
+# 2) Random sub-sampling (max variability in candidates)
+random_variety:
+  bayes:
+    bayes_logreg:
+      draws: 2000
+      tune: 1000
+      chains: 2
+      target_accept: 0.9
+      thin: 100
+      max_members: 12
+      candidate_pool_size: 150
+      sample_strategy: random
+      random_seed: 7
+  output:
+    experiment_name: "random_variety"
+
+# 3) Aggressive thinning (reduce auto-correlation, spread samples)
+aggressive_thinning:
+  bayes:
+    bayes_logreg:
+      draws: 2000
+      tune: 1000
+      chains: 2
+      target_accept: 0.9
+      thin: 100
+      max_members: 10
+      candidate_pool_size: 100
+      sample_strategy: thinning
+      thinning_step: 25    # denser than default 100 to increase options
+      random_seed: 42
+  output:
+    experiment_name: "aggressive_thinning"
+
+# 4) Smaller ensemble, stronger calibration bias (fewer, less correlated)
+lean_low_ece:
+  bayes:
+    bayes_logreg:
+      draws: 1500
+      tune: 1000
+      chains: 2
+      target_accept: 0.9
+      thin: 100
+      max_members: 6       # fewer members can help calibration
+      candidate_pool_size: 80
+      sample_strategy: per_chain
+      per_chain_candidates: 20
+      random_seed: 2025
+  output:
+    experiment_name: "lean_low_ece"
+
+# 5) Larger pool + default linspace (accuracy-first baseline)
+linspace_broad_pool:
+  bayes:
+    bayes_logreg:
+      draws: 2000
+      tune: 1000
+      chains: 2
+      target_accept: 0.9
+      thin: 100
+      max_members: 10
+      candidate_pool_size: 200  # give the greedy step more choices
+      sample_strategy: linspace
+      random_seed: 11
+  output:
+    experiment_name: "linspace_broad_pool"

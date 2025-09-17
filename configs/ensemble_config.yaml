@@ -16,7 +16,13 @@ bayes:
     chains: 2
     target_accept: 0.9
     thin: 100
-    max_members: 10
+  # Ensemble construction knobs
+  max_members: 10                 # final ensemble size
+  candidate_pool_size: 80         # how many posterior draws to consider before selection
+  sample_strategy: "linspace"     # one of: linspace | random | thinning | per_chain
+  thinning_step: 100              # used when sample_strategy=thinning (every k-th sample)
+  per_chain_candidates: null      # used when sample_strategy=per_chain (candidates per chain)
+  random_seed: 42                 # seed for reproducibility (random/per_chain top-up)
 
 output:
   results_dir: "results"

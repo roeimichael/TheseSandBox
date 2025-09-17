@@ -1,0 +1,75 @@
+# Ignore data files
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.json
+*.xml
+*.db
+*.sqlite
+*.h5
+*.parquet
+*.feather
+*.sav
+*.dat
+*.data
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Ignore Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Ignore Python cache and environment files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+*.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Ignore logs and outputs
+*.log
+*.out
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/project files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Ignore temporary files
+*.tmp
+*.temp
+*.swp
+*.bak
+*.~*
+
+# Ignore images and media (optional, uncomment if needed)
+# *.png
+# *.jpg
+# *.jpeg
+# *.gif
+# *.mp4
+# *.mp3
+
+# Ignore results and figures (optional, uncomment if needed)
+# results/
+# figures/

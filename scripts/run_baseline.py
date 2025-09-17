@@ -8,8 +8,8 @@ import json
 import yaml
 import numpy as np
 import pandas as pd
-from utils.logger import get_logger
-from utils.data_loader import DatasetConfig, load_dataset, preprocess_and_split
+from extra_util.logger import get_logger
+from extra_util.data_loader import DatasetConfig, load_dataset, preprocess_and_split
 from models.baseline_models import get_models, fit_and_predict
 from evaluation.metrics import compute_basic_metrics
 

@@ -1,7 +1,0 @@
-Metric,Value
-Average Disagreement (Val),0.033299145299145294
-Average Disagreement (Test),0.028854700854700845
-Average Correlation (Val),0.8093099219871631
-Average Correlation (Test),0.8105261221526011
-Average Q-Statistic (Val),0.9949902599800776
-Average Q-Statistic (Test),0.9949933025939776

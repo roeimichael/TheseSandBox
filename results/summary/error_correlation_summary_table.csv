@@ -1,4 +1,0 @@
-Condition,Validation Correlation,Test Correlation,Validation Samples,Test Samples
-Overall,0.8877086506653572,0.9022325696728036,650,1300
-Class 0 (Low Quality),0.7621186845894089,0.746249129655694,522,1045
-Class 1 (High Quality),0.8165710726261953,0.830738256452608,128,255
