@@ -16,6 +16,14 @@ bayes:
     chains: 2
     target_accept: 0.9
     thin: 100
+  bayes_mlp:
+    hidden_sizes: [32]
+    prior_scale: 1.0
+    svi_steps: 1500
+    lr: 0.001
+    batch_size: 128
+    posterior_samples: 400
+    random_seed: 42
   # Ensemble construction knobs
   max_members: 10                 # final ensemble size
   candidate_pool_size: 80         # how many posterior draws to consider before selection

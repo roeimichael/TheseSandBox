@@ -83,3 +83,31 @@ linspace_broad_pool:
       random_seed: 11
   output:
     experiment_name: "linspace_broad_pool"
+
+# ---- BNN (bayes_mlp) strategy presets ----
+bnn_random_variety:
+  bayes:
+    bayes_mlp:
+      hidden_sizes: [64]
+      svi_steps: 2000
+      lr: 0.001
+      posterior_samples: 600
+      max_members: 12
+      candidate_pool_size: 150
+      sample_strategy: random
+      random_seed: 7
+  output:
+    experiment_name: "bnn_random_variety"
+
+bnn_lean_low_ece:
+  bayes:
+    bayes_mlp:
+      hidden_sizes: [32]
+      svi_steps: 1500
+      posterior_samples: 400
+      max_members: 6
+      candidate_pool_size: 80
+      sample_strategy: per_chain  # treated as linspace here; no chains in SVI
+      random_seed: 2025
+  output:
+    experiment_name: "bnn_lean_low_ece"

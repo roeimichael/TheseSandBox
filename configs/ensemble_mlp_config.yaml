@@ -1,0 +1,74 @@
+# Configuration dedicated to the Bayesian MLP (SVI) ensemble.
+# Keeps defaults out of code so behaviour is transparent and editable.
+# All keys here are expected by bayes_mlp_pyro._get_cfg. Missing keys will raise.
+
+bayes:
+  bayes_mlp:
+    hidden_sizes: [64, 32]
+    prior_scale: 1.0
+    random_seed: 42
+    svi_steps: 1500
+    lr: 0.001
+    batch_size: 128
+    posterior_samples: 400
+    # Ensemble selection settings
+    max_members: 10
+    candidate_pool_size: 200
+    sample_strategy: linspace   # options: linspace | random | thinning (future-proof)
+    thinning_step: 20           # used if sample_strategy == thinning
+    per_chain_candidates: null  # unused for SVI but kept for symmetry with NUTS
+  # New regularization / selection controls
+  class_weighting: balanced   # none | balanced | custom (supply class_weights: [w_neg,w_pos])
+  selection_metric: f1        # base metric (f1 | accuracy)
+  selection_alpha_auc: 0.5    # blend weight for AUC in quality score
+  diversity_lambda: 0.05      # penalty weight for correlation
+  drop_all_positive_thresh: 0.95  # drop candidates predicting positive above this rate
+  drop_all_negative_thresh: 0.05  # drop candidates predicting positive below this rate
+  # Trajectory sampling (set mode: trajectory to enable)
+  mode: posterior             # only posterior sampling retained
+
+output:
+  results_dir: "results"
+  experiment_name: "bnn_baseline"
+  save_member_metrics_csv: true
+  save_ensemble_metrics_csv: true
+
+dataset:
+  name: wine_quality
+  target: ""
+  csv_path: ""
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  scale_numeric: true
+  quality_threshold: 6  # lowered from 7 to reduce class imbalance (approx positive rate ~0.63)
+  wine_variant: both
+
+# Optional batch of experimental strategies. Each strategy can override any part of the base config.
+# Runner will iterate these automatically if present.
+experiments:
+  strategies:
+    posterior_400:
+      bayes:
+        bayes_mlp:
+          svi_steps: 1500
+          posterior_samples: 400
+          candidate_pool_size: 200
+          max_members: 10
+          sample_strategy: linspace
+    thinning_stride_5:
+      bayes:
+        bayes_mlp:
+          posterior_samples: 600
+          candidate_pool_size: 300
+          max_members: 12
+          sample_strategy: thinning
+          thinning_step: 5
+    small_fast:
+      bayes:
+        bayes_mlp:
+          svi_steps: 800
+          posterior_samples: 200
+          candidate_pool_size: 120
+          max_members: 6
+          sample_strategy: linspace
