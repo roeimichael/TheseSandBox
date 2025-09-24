@@ -4,7 +4,18 @@ Lightweight numpy/pandas helpers used across the project.
 """
 from __future__ import annotations
 import numpy as np
-from evaluation.metrics import expected_calibration_error
+try:
+    from evaluation.metrics import expected_calibration_error
+except ModuleNotFoundError:
+    import sys, pathlib, importlib.util
+    _NP_ROOT = pathlib.Path(__file__).resolve().parents[1]
+    metrics_path = _NP_ROOT / 'evaluation' / 'metrics.py'
+    if metrics_path.exists():
+        spec = importlib.util.spec_from_file_location('evaluation.metrics', metrics_path)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[arg-type]
+            expected_calibration_error = getattr(mod, 'expected_calibration_error')  # type: ignore
 
 
 def to_np1d(y):

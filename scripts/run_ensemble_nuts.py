@@ -31,7 +31,6 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "ensembl
 def _ensure_nuts_dirs(base_dir: Path, exp_name: str):
     """Create directory structure for NUTS ensemble results."""
     nuts_dir = base_dir / "ensemble_nuts" / exp_name
-    (nuts_dir / "members").mkdir(parents=True, exist_ok=True)
     return nuts_dir
 
 def save_member_proba_tables(val_member_probas: list[np.ndarray], test_member_probas: list[np.ndarray], out_dir: Path) -> None:

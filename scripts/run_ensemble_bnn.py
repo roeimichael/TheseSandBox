@@ -9,7 +9,11 @@ import yaml
 import numpy as np
 import pandas as pd
 from typing import Dict, Any
-import copy
+import copy, sys, pathlib
+# Ensure root path for package imports when run directly
+_BNN_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(_BNN_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BNN_ROOT))
 from extra_util.logger import get_logger
 from extra_util.data_loader import DatasetConfig, load_dataset, preprocess_and_split
 from models.bayes_mlp_pyro import (
@@ -18,21 +22,19 @@ from models.bayes_mlp_pyro import (
     proba_for_indices,
     average_proba,
 )
-from evaluation.metrics import positive_class_probability
+from importlib import import_module as _import_module
+positive_class_probability = _import_module('evaluation.metrics').positive_class_probability
 from sklearn.metrics import f1_score
 from evaluation.helpers import metrics_block
-from scripts.build_correlation_summary import (
-    export_diversity_and_correlation,
-    export_correlation_summary,
-    write_correlation_formulas,
-)
+write_full_diversity_artifacts = _import_module('evaluation.metrics').write_full_diversity_artifacts
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "ensemble_mlp_config.yaml"
 
 
 def _ensure_dirs(base_dir: Path, exp_name: str):
     out_dir = base_dir / "ensemble_bnn" / exp_name
-    (out_dir / "members").mkdir(parents=True, exist_ok=True)
     (out_dir / "summary").mkdir(parents=True, exist_ok=True)
     return out_dir, out_dir / "summary"
 
@@ -118,10 +120,39 @@ def _compute_and_persist(
         "log_loss_test": float(tm["log_loss"]), "ece_test": float(tm["ece"]),
     })
     df = pd.DataFrame(rows); df.to_csv(summary_dir / "members_and_ensemble_metrics.csv", index=False)
-    diversity, cond_err_corr = export_diversity_and_correlation(
-        val_member_probas, test_member_probas, y_val, y_test, out_dir, summary_dir
+    # Extended diversity & correlation artifacts
+    diversity_reports = write_full_diversity_artifacts(
+        val_member_probas, test_member_probas, y_val, y_test,
+        out_dir, summary_dir,
+        write_pairwise=False,  # suppress all pairwise CSVs
+        write_extended_json=False,  # don't persist huge JSON unless needed
+        write_summary_csv=True
     )
-    export_correlation_summary(diversity, cond_err_corr, summary_dir); write_correlation_formulas(summary_dir)
+    # Generate simplified error correlation heatmap (validation overall conditional errors already captured indirectly by metrics file)
+    try:
+        # Build probability correlation heatmap (Pearson) for quick visual
+        pearson_map = diversity_reports['val']['pairwise']['pearson_proba_corr']
+        # Determine number of members
+        n_members = len(val_member_probas)
+        mat = np.eye(n_members)
+        for key, v in pearson_map.items():
+            a, b = key.split('_vs_')
+            ia = int(a.split('_')[-1]) - 1; ib = int(b.split('_')[-1]) - 1
+            mat[ia, ib] = v; mat[ib, ia] = v
+        plt.figure(figsize=(6,5))
+        sns.heatmap(mat, vmin=-1, vmax=1, cmap='coolwarm', square=True, cbar_kws={'label':'Pearson proba corr'})
+        plt.title('Member Probability Correlation (Val)')
+        plt.xlabel('Member'); plt.ylabel('Member')
+        plt.tight_layout()
+        plt.savefig(summary_dir / 'member_proba_corr_heatmap.png', dpi=200)
+        plt.close()
+    except Exception as e:
+        logger.warning(f"Failed to create heatmap: {e}")
+    # Embed compact diversity summaries
+    diversity_compact = {
+        'val': diversity_reports['val']['summary'],
+        'test': diversity_reports['test']['summary']
+    }
     summary = {
         "experiment_name": exp_name, "n_members": len(member_indices),
         "val_metrics": vm, "test_metrics": tm,
@@ -129,6 +160,7 @@ def _compute_and_persist(
         "strategy_overrides": strategy or {},
         "selected_member_indices": list(map(int, member_indices)),
         "adaptive_threshold": adaptive_threshold,
+        "diversity_summary": diversity_compact,
     }
     with open(summary_dir / "ensemble_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
@@ -176,8 +208,79 @@ def run_ensemble_bnn(config_path: Path | None = None, exp_name: str | None = Non
     if summaries:
         agg_dir = Path(cfg['output']['results_dir']) / 'ensemble_bnn' / 'experiments'
         agg_dir.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(summaries).to_csv(agg_dir / 'experiments_summary.csv', index=False)
+        df_exp = pd.DataFrame(summaries)
+        df_exp.to_csv(agg_dir / 'experiments_summary.csv', index=False)
         logger.info(f"Aggregated experiments summary written to {agg_dir / 'experiments_summary.csv'}")
+        # Create comparative bar chart for top 3 ensembles by validation F1 including diversity metrics
+        try:
+            top3 = df_exp.sort_values('f1_val', ascending=False).head(3)
+            plt.figure(figsize=(6,4))
+            idx = np.arange(len(top3))
+            bar_w = 0.35
+            plt.bar(idx - bar_w/2, top3['f1_val'], bar_w, label='F1 Val')
+            plt.bar(idx + bar_w/2, top3['f1_test'], bar_w, label='F1 Test')
+            plt.xticks(idx, top3['experiment'], rotation=30, ha='right')
+            plt.ylabel('F1 Score')
+            plt.title('Top 3 Ensembles (Validation/Test F1)')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(agg_dir / 'top3_ensembles_f1.png', dpi=200)
+            plt.close()
+            # Gather diversity + performance metrics for radar: accuracy, f1, roc_auc, 1-ece, (1-avg_pearson_proba_corr), disagreement
+            metrics_axes = ['accuracy_val','f1_val','roc_auc_val','ece_val','avg_pearson_proba_corr','avg_disagreement']
+            # Normalize metrics except ECE (invert ECE)
+            fig = plt.figure(figsize=(6,6))
+            angles = np.linspace(0, 2*np.pi, len(metrics_axes), endpoint=False).tolist()
+            angles += angles[:1]
+            ax = plt.subplot(111, polar=True)
+            for _, row in top3.iterrows():
+                exp_path = Path(cfg['output']['results_dir']) / 'ensemble_bnn' / row['experiment'] / 'summary' / 'members_and_ensemble_metrics.csv'
+                if not exp_path.exists():
+                    continue
+                dfm = pd.read_csv(exp_path)
+                ens_row = dfm[dfm['type']=='ensemble'].iloc[0]
+                # Load diversity summary stored in ensemble_summary
+                summary_json = Path(cfg['output']['results_dir']) / 'ensemble_bnn' / row['experiment'] / 'summary' / 'ensemble_summary.json'
+                if summary_json.exists():
+                    with open(summary_json,'r') as fjson:
+                        js = json.load(fjson)
+                    div_val = js.get('diversity_summary', {}).get('val', {})
+                else:
+                    div_val = {}
+                # Build raw values mapping
+                raw_vals = {
+                    'accuracy_val': ens_row['accuracy_val'],
+                    'f1_val': ens_row['f1_val'],
+                    'roc_auc_val': ens_row['roc_auc_val'],
+                    'ece_val': ens_row['ece_val'],
+                    'avg_pearson_proba_corr': div_val.get('avg_pearson_proba_corr', np.nan),
+                    'avg_disagreement': div_val.get('avg_disagreement', np.nan),
+                }
+                normed = []
+                for i,m in enumerate(metrics_axes):
+                    v = raw_vals[m]
+                    if np.isnan(v):
+                        nv = 0.0
+                    else:
+                        if m == 'ece_val':
+                            nv = 1 - min(1.0, v)  # lower ece better
+                        elif m == 'avg_pearson_proba_corr':
+                            nv = 1 - max(0.0, min(1.0, v))  # invert correlation (lower corr -> higher score)
+                        else:
+                            nv = max(0.0, min(1.0, v))
+                    normed.append(nv)
+                normed += normed[:1]
+                ax.plot(angles, normed, label=row['experiment'])
+                ax.fill(angles, normed, alpha=0.15)
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(['Acc','F1','AUC','1-ECE','1-Corr','Disagree'])
+            ax.set_title('Top Ensembles: Performance & Diversity (Val)')
+            ax.legend(loc='upper right', bbox_to_anchor=(1.4,1.1))
+            plt.tight_layout()
+            plt.savefig(agg_dir / 'top3_ensembles_radar_val.png', dpi=200)
+            plt.close()
+        except Exception as e:
+            logger.warning(f"Failed to create multi-ensemble graphs: {e}")
     return {'experiments': summaries}
 
 

@@ -8,10 +8,17 @@ import json
 import yaml
 import numpy as np
 import pandas as pd
+import sys, pathlib
+# Guarantee project root and evaluation package on path early
+_PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 from extra_util.logger import get_logger
 from extra_util.data_loader import DatasetConfig, load_dataset, preprocess_and_split
 from models.baseline_models import get_models, fit_and_predict
-from evaluation.metrics import compute_basic_metrics
+# Local import to avoid external package name collision
+from importlib import import_module as _import_module
+compute_basic_metrics = _import_module('evaluation.metrics').compute_basic_metrics
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "experiment_config.yaml"
 

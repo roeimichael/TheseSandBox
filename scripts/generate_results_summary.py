@@ -38,7 +38,9 @@ def load_results(exp_name: str = "baseline_wine") -> Dict:
         error_corr_data = json.load(f)
     
     # Load individual member results
-    member_files = list((ensemble_dir / "members").glob("bayes_logreg_*.csv"))
+    # members directory removed; adjust if legacy results still have it
+    member_dir = ensemble_dir / "members"
+    member_files = list(member_dir.glob("bayes_logreg_*.csv")) if member_dir.exists() else []
     member_data = []
     for file in member_files:
         df = pd.read_csv(file)

@@ -17,6 +17,7 @@ from pyro.infer import SVI, Trace_ELBO, Predictive
 from pyro.optim import ClippedAdam
 from sklearn.metrics import accuracy_score
 from evaluation.helpers import conditional_prediction_correlation as conditional_correlation
+from evaluation.metrics import expected_calibration_error as _ece
 
 
 def _to_tensor(x, device: str, dtype=torch.float32) -> torch.Tensor:
@@ -315,7 +316,17 @@ def select_member_indices(
     cfg: dict,
     strategy: dict | None = None,
 ) -> List[int]:
-    # Merge overrides for selection only (does not touch stored samples)
+    """Unified risk-based selection (simplified).
+
+    Process:
+      1. Build candidate pool from posterior samples (thinning / random / linspace).
+      2. Compute validation predictions + base quality metric (F1 or accuracy blended with AUC if requested).
+      3. Iteratively add members by maximizing a risk score that rewards quality & disagreement
+         while penalizing error correlation, probability correlation, ECE and log-loss.
+
+    Removed: legacy basic and multi-mode branches (always uses risk logic). Clustering is
+    omitted for simplicity; diversity pressure comes from the correlation / disagreement terms.
+    """
     bayes = posterior.cfg.copy()
     if strategy:
         bayes.update(strategy)
@@ -329,7 +340,7 @@ def select_member_indices(
     sample_strategy = str(bayes.get("sample_strategy", "linspace")).lower()
     thinning_step = int(bayes.get("thinning_step", 1)) or 1
 
-    # Build candidate indices
+    # Candidate indices
     if candidate_pool_size >= K:
         candidate = np.arange(K, dtype=int)
     else:
@@ -339,23 +350,22 @@ def select_member_indices(
             stride = max(1, thinning_step)
             candidate = np.arange(0, K, stride, dtype=int)
             if len(candidate) < candidate_pool_size:
-                # pad with linspace unique values
                 extra = np.setdiff1d(np.linspace(0, K - 1, candidate_pool_size, dtype=int), candidate)
                 candidate = np.concatenate([candidate, extra[: candidate_pool_size - len(candidate)]])
             candidate = candidate[:candidate_pool_size]
-        else:  # linspace default
+        else:  # linspace
             candidate = np.linspace(0, K - 1, candidate_pool_size, dtype=int)
-    # Score candidates on validation
+
+    # Validation scoring
     logits = _vectorized_logits(posterior.samples, X_val, posterior.device)
-    logits_c = logits[candidate]  # (C, n)
-    p = torch.sigmoid(logits_c).cpu().numpy()  # (C, n)
+    logits_c = logits[candidate]
+    p = torch.sigmoid(logits_c).cpu().numpy()
     p = np.clip(p, 1e-7, 1 - 1e-7)
-    proba_val = np.stack([1 - p, p], axis=-1)  # (C, n, 2)
-    preds = (p >= 0.5).astype(np.int8)  # (C, n)
+    proba_val = np.stack([1 - p, p], axis=-1)  # (C,n,2)
+    preds = (p >= 0.5).astype(np.int8)
 
     yv = y_val.to_numpy() if hasattr(y_val, "to_numpy") else np.asarray(y_val)
     acc = (preds == yv[None, :]).mean(axis=1)
-    # Vectorized precision/recall/F1
     tp = (preds & (yv[None, :] == 1)).sum(axis=1)
     fp = (preds & (yv[None, :] == 0)).sum(axis=1)
     fn = ((1 - preds) & (yv[None, :] == 1)).sum(axis=1)
@@ -363,27 +373,9 @@ def select_member_indices(
     recall = np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) > 0)
     f1 = np.divide(2 * precision * recall, precision + recall, out=np.zeros_like(precision), where=(precision + recall) > 0)
 
-    # Selection parameters
-    selection_metric = str(bayes.get("selection_metric", "f1")).lower()  # f1 | accuracy
-    diversity_lambda = float(bayes.get("diversity_lambda", 0.05))
-    alpha_auc = float(bayes.get("selection_alpha_auc", 0.0))  # blend weight for AUC
-    drop_pos_thresh = float(bayes.get("drop_all_positive_thresh", 1.1))
-    drop_neg_thresh = float(bayes.get("drop_all_negative_thresh", -0.1))
-
-    # Candidate filtering: remove near-all-positive or near-all-negative predictors
-    pos_rate = preds.mean(axis=1)
-    keep_mask = (pos_rate <= drop_pos_thresh) & (pos_rate >= drop_neg_thresh)
-    # Additional stricter filter if thresholds in (0,1)
-    if drop_pos_thresh <= 1.0:
-        keep_mask &= ~(pos_rate >= drop_pos_thresh)
-    if drop_neg_thresh >= 0.0:
-        keep_mask &= ~(pos_rate <= drop_neg_thresh)
-    if not keep_mask.any():  # fallback if all filtered
-        keep_mask[:] = True
-    acc = acc[keep_mask]; f1 = f1[keep_mask]; precision = precision[keep_mask]; recall = recall[keep_mask]
-    preds = preds[keep_mask]; proba_val = proba_val[keep_mask]; candidate = candidate[keep_mask]
-
-    # AUC per candidate (approx; uses probas directly)
+    # Metric selection / blend
+    selection_metric = str(bayes.get("selection_metric", "f1")).lower()
+    alpha_auc = float(bayes.get("selection_alpha_auc", 0.0))
     try:
         from sklearn.metrics import roc_auc_score as _auc
         auc_vals = np.array([
@@ -391,52 +383,92 @@ def select_member_indices(
         ])
     except Exception:
         auc_vals = np.full((proba_val.shape[0],), 0.5)
-    norm_auc = np.clip((auc_vals - 0.5) / 0.5, 0, 1)  # map 0.5..1 -> 0..1
-
-    metric_array = f1 if selection_metric == "f1" else acc
-    if np.all(metric_array == 0):  # fallback if all F1 zero
-        metric_array = acc
-
-    # Blend with AUC
+    norm_auc = np.clip((auc_vals - 0.5) / 0.5, 0, 1)
+    quality_raw = f1 if selection_metric == "f1" else acc
+    if np.all(quality_raw == 0):
+        quality_raw = acc
     if alpha_auc > 0:
-        metric_array = (1 - alpha_auc) * metric_array + alpha_auc * norm_auc
+        quality_raw = (1 - alpha_auc) * quality_raw + alpha_auc * norm_auc
 
-    # Seed: best metric (break ties by higher recall, then lower variance collapse penalty)
-    collapse_penalty = (preds.std(axis=1) == 0).astype(float)  # 1 if constant
-    seed_idx = int(np.argmax(metric_array - 0.5 * collapse_penalty))
-    selected_local = [seed_idx]
+    # Risk weights
+    risk_weights = bayes.get("risk_weights", {}) or {}
+    w_quality = float(risk_weights.get("quality", 1.0))
+    w_err = float(risk_weights.get("error_corr", 0.5))
+    w_proba = float(risk_weights.get("proba_corr", 0.3))
+    w_dis = float(risk_weights.get("disagreement", 0.2))
+    w_ece = float(risk_weights.get("ece", 0.1))
+    w_ll = float(risk_weights.get("log_loss", 0.1))
+    risk_min_gain = float(bayes.get("risk_min_gain", -1e9))
 
-    # Greedy additions balancing diversity (low conditional corr) and quality (metric)
-    while len(selected_local) < min(max_members, len(candidate)):
-        unselected = [i for i in range(len(candidate)) if i not in selected_local]
-        if not unselected:
-            break
-        best_idx, best_score = None, None
-        for i in unselected:
-            # Penalize constant predictors strongly (unless no alternative)
-            if preds[i].std() == 0:
-                cbar = 1.0  # worst diversity
+    # Per-candidate log loss & ECE
+    pos_probs = proba_val[:, :, 1]
+    y_float = yv.astype(float)
+    ll_raw = -(y_float[None, :] * np.log(pos_probs) + (1 - y_float[None, :]) * np.log(1 - pos_probs)).mean(axis=1)
+    ece_vals = np.array([_ece(yv, proba_val[i]) for i in range(proba_val.shape[0])])
+    def _minmax(x):
+        mn, mx = float(np.min(x)), float(np.max(x))
+        if mx - mn < 1e-9:
+            return np.zeros_like(x)
+        return (x - mn) / (mx - mn)
+    ll_norm = _minmax(ll_raw)
+    ece_norm = _minmax(ece_vals)
+
+    # Correlation (probability) matrix
+    if pos_probs.shape[0] > 1:
+        corr_matrix = np.corrcoef(pos_probs)
+        corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+    else:
+        corr_matrix = np.ones((1, 1))
+
+    selected_local: List[int] = []
+    collapse_penalty = (preds.std(axis=1) == 0).astype(float)
+    seed_idx = int(np.argmax(w_quality * quality_raw - 0.5 * collapse_penalty - w_ece * ece_norm - w_ll * ll_norm))
+    selected_local.append(seed_idx)
+
+    def risk_score(i: int, current: List[int]) -> float:
+        quality = quality_raw[i]
+        if not current:
+            return w_quality * quality - w_ece * ece_norm[i] - w_ll * ll_norm[i]
+        err_corrs = []
+        prob_corrs = []
+        disagreements = []
+        for s in current:
+            if preds[i].std() == 0 or preds[s].std() == 0:
+                ec = 1.0
             else:
-                corrs = []
-                for s in selected_local:
-                    if preds[s].std() == 0:  # skip correlation with constant existing member
-                        continue
-                    corrs.append(conditional_correlation(preds[i], preds[s], yv))
-                if corrs:
-                    cbar = float(np.nanmean(corrs))
-                else:
-                    cbar = 0.5  # neutral default when no valid correlation
-            quality = metric_array[i]
-            score = quality - diversity_lambda * max(0.0, cbar)
+                ec = conditional_correlation(preds[i], preds[s], yv)
+                if np.isnan(ec):
+                    ec = 0.0
+            err_corrs.append(ec)
+            pc = corr_matrix[i, s]
+            prob_corrs.append(pc)
+            disagreements.append(1.0 - (preds[i] == preds[s]).mean())
+        err_avg = float(np.mean(err_corrs)) if err_corrs else 0.0
+        pc_avg = float(np.mean(prob_corrs)) if prob_corrs else 0.0
+        dis_avg = float(np.mean(disagreements)) if disagreements else 0.0
+        return float(
+            w_quality * quality
+            - w_err * max(0.0, err_avg)
+            - w_proba * max(0.0, pc_avg)
+            + w_dis * dis_avg
+            - w_ece * ece_norm[i]
+            - w_ll * ll_norm[i]
+        )
+
+    while len(selected_local) < min(max_members, len(candidate)):
+        best_idx, best_score = None, None
+        for i in range(len(candidate)):
+            if i in selected_local:
+                continue
+            score = risk_score(i, selected_local)
             if (best_score is None) or (score > best_score):
-                best_score = score
-                best_idx = i
-        if best_idx is None:
+                best_score = score; best_idx = i
+        if best_idx is None or (best_score is not None and best_score < risk_min_gain):
             break
         selected_local.append(best_idx)
 
     selected = [int(candidate[i]) for i in selected_local]
-    print(f"[BNN] Selected {len(selected)} ensemble members (strategy={sample_strategy}, metric={selection_metric})")
+    print(f"[BNN] Selected {len(selected)} ensemble members (risk-based) strategy={sample_strategy}")
     return selected
 
 
