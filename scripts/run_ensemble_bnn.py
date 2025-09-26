@@ -27,14 +27,16 @@ positive_class_probability = _import_module('evaluation.metrics').positive_class
 from sklearn.metrics import f1_score
 from evaluation.helpers import metrics_block
 write_full_diversity_artifacts = _import_module('evaluation.metrics').write_full_diversity_artifacts
+compute_basic_metrics = _import_module('evaluation.metrics').compute_basic_metrics
+expected_calibration_error = _import_module('evaluation.metrics').expected_calibration_error
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "ensemble_mlp_config.yaml"
 
 
-def _ensure_dirs(base_dir: Path, exp_name: str):
-    out_dir = base_dir / "ensemble_bnn" / exp_name
+def _ensure_dirs(base_dir: Path, results_family: str, exp_name: str):
+    out_dir = base_dir / results_family / exp_name
     (out_dir / "summary").mkdir(parents=True, exist_ok=True)
     return out_dir, out_dir / "summary"
 
@@ -76,7 +78,8 @@ def _compute_and_persist(
     strategy: dict | None = None,
 ) -> Dict:
     base_dir = Path(cfg["output"]["results_dir"])
-    out_dir, summary_dir = _ensure_dirs(base_dir, exp_name)
+    results_family = cfg.get('output', {}).get('results_family', 'ensemble_bnn')
+    out_dir, summary_dir = _ensure_dirs(base_dir, results_family, exp_name)
     logger = get_logger(f"bnn_ensemble:{exp_name}")
     posterior = fit_bayes_mlp(X_train, y_train, cfg, strategy=strategy)
     member_indices = select_member_indices(posterior, X_val, y_val, cfg, strategy=strategy)
@@ -98,17 +101,38 @@ def _compute_and_persist(
             "log_loss_test": float(tm["log_loss"]), "ece_test": float(tm["ece"]),
         })
     ens_val = average_proba(val_member_probas); ens_test = average_proba(test_member_probas)
-    pos_val = positive_class_probability(ens_val); pred_val = (pos_val >= 0.5).astype(int)
-    if pred_val.std() == 0:
-        thresholds = np.linspace(0.1, 0.9, 17); best_t, best_f1 = 0.5, -1
-        yv_np = y_val.to_numpy() if hasattr(y_val, 'to_numpy') else np.asarray(y_val)
-        for t in thresholds:
-            f1 = f1_score(yv_np, (pos_val >= t).astype(int), zero_division=0)
-            if f1 > best_f1: best_f1, best_t = f1, t
-        adaptive_threshold = best_t
-    else:
-        adaptive_threshold = 0.5
-    vm = metrics_block(y_val, ens_val); tm = metrics_block(y_test, ens_test)
+    # Unconditional threshold tuning on validation (optimize F1 by default)
+    threshold_objective = (cfg.get('experiments', {}) or {}).get('threshold_objective', 'f1')
+    pos_val = positive_class_probability(ens_val)
+    yv_np = y_val.to_numpy() if hasattr(y_val, 'to_numpy') else np.asarray(y_val)
+    # Sweep thresholds; finer grid for stability
+    grid = np.linspace(0.05, 0.95, 181)
+    best_t, best_score = 0.5, -1.0
+    for t in grid:
+        pred = (pos_val >= t).astype(int)
+        if threshold_objective == 'accuracy':
+            score = (pred == yv_np).mean()
+        elif threshold_objective in ('balanced_accuracy', 'bal_acc'):
+            tp = ((pred == 1) & (yv_np == 1)).sum(); fn = ((pred == 0) & (yv_np == 1)).sum()
+            tn = ((pred == 0) & (yv_np == 0)).sum(); fp = ((pred == 1) & (yv_np == 0)).sum()
+            tpr = tp / max(tp + fn, 1); tnr = tn / max(tn + fp, 1)
+            score = 0.5 * (tpr + tnr)
+        else:  # default F1
+            score = f1_score(yv_np, pred, zero_division=0)
+        if score > best_score:
+            best_score, best_t = float(score), float(t)
+    adaptive_threshold = best_t
+    # Build ensemble metrics using tuned threshold
+    pred_val = (pos_val >= adaptive_threshold).astype(int)
+    vm = compute_basic_metrics(yv_np, ens_val, pred_val)
+    vm_ece = expected_calibration_error(yv_np, ens_val)
+    vm['ece'] = float(vm_ece)
+    pos_test = positive_class_probability(ens_test)
+    yt_np = y_test.to_numpy() if hasattr(y_test, 'to_numpy') else np.asarray(y_test)
+    pred_test = (pos_test >= adaptive_threshold).astype(int)
+    tm = compute_basic_metrics(yt_np, ens_test, pred_test)
+    tm_ece = expected_calibration_error(yt_np, ens_test)
+    tm['ece'] = float(tm_ece)
     vm['adaptive_threshold'] = adaptive_threshold; tm['adaptive_threshold'] = adaptive_threshold
     rows.append({
         "model": "bayes_mlp", "type": "ensemble", "member_id": "ensemble", "n_members": len(member_indices),
@@ -160,6 +184,7 @@ def _compute_and_persist(
         "strategy_overrides": strategy or {},
         "selected_member_indices": list(map(int, member_indices)),
         "adaptive_threshold": adaptive_threshold,
+        "threshold_objective": threshold_objective,
         "diversity_summary": diversity_compact,
     }
     with open(summary_dir / "ensemble_summary.json", "w") as f:
@@ -206,7 +231,8 @@ def run_ensemble_bnn(config_path: Path | None = None, exp_name: str | None = Non
 
     # Aggregate summary CSV
     if summaries:
-        agg_dir = Path(cfg['output']['results_dir']) / 'ensemble_bnn' / 'experiments'
+        results_family = cfg.get('output', {}).get('results_family', 'ensemble_bnn')
+        agg_dir = Path(cfg['output']['results_dir']) / results_family / 'experiments'
         agg_dir.mkdir(parents=True, exist_ok=True)
         df_exp = pd.DataFrame(summaries)
         df_exp.to_csv(agg_dir / 'experiments_summary.csv', index=False)

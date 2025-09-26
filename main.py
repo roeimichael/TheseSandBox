@@ -18,7 +18,7 @@ def main():
     print("\n" + "=" * 60)
     print("Running BNN (MLP, SVI) Ensemble...")
     print("=" * 60)
-    bnn_result = run_ensemble_bnn()
+    # bnn_result = run_ensemble_bnn()
     
     print("\n" + "=" * 60)
     print("Analysis Complete!")

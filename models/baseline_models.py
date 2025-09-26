@@ -29,8 +29,14 @@ def build_mlp(cfg: dict) -> MLPClassifier:
         solver=mcfg.get("solver", "adam"),
         alpha=mcfg.get("alpha", 0.0001),
         learning_rate=mcfg.get("learning_rate", "adaptive"),
-        max_iter=mcfg.get("max_iter", 200),
-        random_state=42
+    max_iter=mcfg.get("max_iter", 200),
+    random_state=mcfg.get("random_state", 42),
+    # Training control knobs (optional; defaults mirror sklearn)
+    early_stopping=mcfg.get("early_stopping", False),
+    n_iter_no_change=mcfg.get("n_iter_no_change", 10),
+    validation_fraction=mcfg.get("validation_fraction", 0.1),
+    tol=mcfg.get("tol", 1e-4),
+    learning_rate_init=mcfg.get("learning_rate_init", 0.001),
     )
 
 

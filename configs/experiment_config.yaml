@@ -6,7 +6,7 @@ dataset:
   val_size: 0.1
   random_state: 42
   scale_numeric: true
-  quality_threshold: 7
+  quality_threshold: 6
   wine_variant: both   # one of: red, white, both
 
 training:

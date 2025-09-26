@@ -1,0 +1,60 @@
+model:
+  base:
+    hidden_layer_sizes: [100, 50]
+    activation: relu
+    solver: adam
+    alpha: 0.0001
+    learning_rate: adaptive
+    # optional: learning_rate_init can be overridden in variations
+    max_iter: 300
+
+  variations:
+    seeds: [1,2,3,4,5,6,7,8,9,10]
+    hidden_layer_sizes:
+      - [64, 32]
+      - [128, 64]
+      - [256, 128]
+      - [256, 128, 64]
+    alpha: [1.0e-05, 1.0e-04, 5.0e-04, 1.0e-03]
+    activation: [relu, tanh]
+    solver: [adam, lbfgs]
+    learning_rate_init: [0.0001, 0.0003, 0.001]
+
+selection:
+  selection_metric: f1
+  selection_alpha_auc: 0.3
+
+  risk_weights:
+    diversity: 0.40                # 1 - rho^2 (positive corr); higher => more orthogonal
+    marginal_gain: 0.30            # normalized log-loss improvement when added to ensemble
+    uncertainty_alignment: 0.15    # disagreement focused where ensemble is uncertain
+    quality: 0.15                  # intrinsic (F1/acc + AUC_norm) modulated by (1 - ECE)
+
+  target_members: 20
+  risk_accept_threshold: 0.35
+  base_max_iter_fallback: 900
+  convergence_clip_ratio: 0.85       # default cap if range below is not set
+  # Randomize per-candidate cap to diversify endpoints (optional)
+  shuffle_variants: true
+  shuffle_seed: 42
+  cap_clip_ratio_min: 0.70
+  cap_clip_ratio_max: 0.95
+
+threshold:
+  objective: f1                       # f1 | accuracy | balanced_accuracy
+
+output:
+  results_dir: "results"
+  results_family: "ensemble_mlp_classic"
+  experiment_name: "mlp_classic_baseline"
+
+dataset:
+  name: wine_quality
+  target: ""
+  csv_path: ""
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  scale_numeric: true
+  quality_threshold: 6
+  wine_variant: both
